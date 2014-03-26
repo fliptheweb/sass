@@ -3,7 +3,667 @@
 * Table of contents
 {:toc}
 
-## 3.2.2
+## 3.3.4 (21 March 2014)
+
+* Improve the warning message for `index(...) == false`.
+
+* Fix the use of directives like `@font-face` within `@at-root`.
+
+* Fix a `sass --watch` issue on Windows where too many files would be updated
+  on every change.
+
+* Avoid freezing Ruby's `nil` value.
+
+## 3.3.3 (14 March 2014)
+
+* Fix a bug in Sass that was causing caching errors when unserializable objects
+  were in the Ruby options hash. Note that these errors may persist when using
+  Sass with Sprockets until the Sprockets importer is made serializable.
+
+## 3.3.2 (11 March 2014)
+
+* Fix a bug with loading the bundled version of Listen.
+
+## 3.3.1 (10 March 2014)
+
+This release includes a number of fixes for issues that popped up in the
+immediate aftermath of the 3.3.0 release.
+
+### Re-bundle [listen](http://github.com/guard/listen)
+
+With 3.3.0, we un-bundled the listen library from Sass. We did so hoping that it
+would make it easier for users to keep up to date with the latest features and
+bug fixes, but unfortunately listen 2.0 and on have dropped support for Ruby
+1.8.7, which Sass continues to support. Further complicating things, RubyGems
+lacks the ability to install only the version of listen supported by the current
+Ruby installation, so we were unable to use a standard Gem dependency on listen.
+
+To work around this, we tried to piggyback on RubyGems' native extension support
+to install the correct version of listen when Sass was installed. This is what
+we released in 3.3.0. However, this caused numerous problems in practice,
+especially for users on Windows. It quickly became clear that this wasn't a
+viable long-term solution.
+
+As such, we're going back to the bundling strategy. While not perfect, this
+worked well enough for the duration of the Sass 3.2 release, and we expect it to
+cause much less havoc than un-bundling. We'll bundle listen 1.3.1, the most
+recent version that retains Ruby 1.8.7 compatibility. If a user of Sass has a
+more recent version of listen installed, that will be preferred to the bundled
+version. Listen versions through 2.7.0 have been tested, and we expect the code
+to work without modification on versions up to 3.0.0, assuming no major API
+changes.
+
+### Smaller Changes
+
+* Fixed a small interface incompatibility with listen 2.7.0.
+
+* Fix some corner cases of path handling on Windows.
+
+* Avoid errors when trying to watch read-only directories using listen 1.x.
+
+## 3.3.0 (7 March 2014)
+
+### SassScript Maps
+
+SassScript has a new data type: maps. These are associations from SassScript
+values (often strings, but potentially any value) to other SassScript values.
+They look like this:
+
+    $map: (key1: value1, key2: value2, key3: value3);
+
+Unlike lists, maps must always be surrounded by parentheses. `()` is now an
+empty map in addition to an empty list.
+
+Maps will allow users to collect values into named groups and access those
+groups dynamically. For example, you could use them to manage themes for your
+stylesheet:
+
+    $themes: (
+      mist: (
+        header: #DCFAC0,
+        text:   #00968B,
+        border: #85C79C
+      ),
+      spring: (
+        header: #F4FAC7,
+        text:   #C2454E,
+        border: #FFB158
+      ),
+      // ...
+    );
+
+    @mixin themed-header($theme-name) {
+      h1 {
+        color: map-get(map-get($themes, $theme-name), header);
+      }
+    }
+
+There are a variety of functions for working with maps:
+
+* The {Sass::Script::Functions#map_get `map-get($map, $key)` function} returns
+  the value in the map associated with the given key. If no value is found, it
+  returns `null`.
+
+* The {Sass::Script::Functions#map_merge `map-merge($map1, $map2)` function}
+  merges two maps together into a new map. If there are any conflicts, the
+  second map takes precedence, making this a good way to modify values in a map
+  as well.
+
+* The {Sass::Script::Functions#map_remove `map-remove($map, $key)` function}
+  returns a new map with a key removed.
+
+* The {Sass::Script::Functions#map_keys `map-keys($map)` function} returns all
+  the keys in a map as a comma-separated list.
+
+* The {Sass::Script::Functions#map_values `map-values($map)` function} returns
+  all the values in a map as a comma-separated list.
+
+* The {Sass::Script::Functions#map_has_key `map-has-key($map, $key)` function}
+  returns whether or not a map contains a pair with the given key.
+
+All the existing list functions also work on maps, treating them as lists of
+pairs. For example, `nth((foo: 1, bar: 2), 1)` returns `foo 1`. Maps can also be
+used with `@each`, using the new multiple assignment feature (see below):
+
+    @each $header, $size in (h1: 2em, h2: 1.5em, h3: 1.2em) {
+      #{$header} {
+        font-size: $size;
+      }
+    }
+
+Produces:
+
+    h1 {
+      font-size: 2em;
+    }
+
+    h2 {
+      font-size: 1.5em;
+    }
+
+    h3 {
+      font-size: 1.2em;
+    }
+
+#### Variable Keyword Arguments
+
+Maps can be passed as variable arguments, just like lists. For example, if
+`$map` is `(alpha: -10%, "blue": 30%)`, you can write `scale-color($color,
+$map...)` and it will do the same thing as `scale-color($color, $alpha: -10%,
+$blue: 30%)`. To pass a variable argument list and map at the same time, just do
+the list first, then the map, as in `fn($list..., $map...)`.
+
+You can also access the keywords passed to a function that accepts a variable
+argument list using the new {Sass::Script::Functions#keywords `keywords($args)`
+function}. For example:
+
+    @function create-map($args...) {
+      @return keywords($args);
+    }
+
+    create-map($foo: 10, $bar: 11); // returns (foo: 10, bar: 11)
+
+#### Lists of Pairs as Maps
+
+The new map functions work on lists of pairs as well, for the time being. This
+feature exists to help libraries that previously used lists of pairs to simulate
+maps. These libraries can now use map functions internally without introducing
+backwards-incompatibility. For example:
+
+    $themes: (
+      mist (
+        header #DCFAC0,
+        text   #00968B,
+        border #85C79C
+      ),
+      spring (
+        header #F4FAC7,
+        text   #C2454E,
+        border #FFB158
+      ),
+      // ...
+    );
+
+    @mixin themed-header($theme-name) {
+      h1 {
+        color: map-get(map-get($themes, $theme-name), header);
+      }
+    }
+
+Since it's just a migration feature, using lists of pairs in place of maps is
+already deprecated. Library authors should encourage their users to use actual
+maps instead.
+
+### Source Maps
+
+Sass now has the ability to generate standard JSON [source maps][] of a format
+that will soon be supported in most major browsers. These source maps tell the
+browser how to find the Sass styles that caused each CSS style to be generated.
+They're much more fine-grained than the old Sass-specific debug info that was
+generated; rather than providing the source location of entire CSS rules at a
+time, source maps provide the source location of each individual selector and
+property.
+
+Source maps can be generated by passing the `--sourcemap` flag to the `sass`
+executable, by passing the {file:SASS_REFERENCE.md#sourcemap-option `:sourcemap`
+option} to \{Sass::Plugin}, or by using the
+\{Sass::Engine#render\_with\_sourcemap} method. By default, Sass assumes that
+the source stylesheets will be made available on whatever server you're using,
+and that their relative location will be the same as it is on the local
+filesystem. If this isn't the case, you'll need to make a custom class that
+extends \{Sass::Importers::Base} or \{Sass::Importers::Filesystem} and overrides
+\{Sass::Importers::Base#public\_url `#public_url`}.
+
+Thanks to Alexander Pavlov for implementing this.
+
+[source maps]: https://docs.google.com/document/d/1U1RGAehQwRypUTovF1KRlpiOFze0b-_2gc6fAH0KY0k/edit?hl=en_US&pli=1&pli=1
+
+#### `@at-root`
+
+Sass 3.3 adds the `@at-root` directive, which is a way to tell Sass to
+put a collection of rules at the top-level root of the document. The
+easiest way to use it is with a selector:
+
+    .badge {
+      @at-root .info { ... }
+      @at-root .header { ... }
+    }
+
+In addition to using `@at-root` on a single selector, you can also use it on a
+whole block of them. For example:
+
+    .badge {
+      @at-root {
+        .info { ... }
+        .header { ... }
+      }
+    }
+
+Also produces:
+
+    .info { ... }
+    .header { ... }
+
+#### `@at-root (without: ...)` and `@at-root (with: ...)`
+
+By default, `@at-root` just excludes selectors. However, it's also
+possible to use `@at-root` to move outside of nested directives such
+as `@media` as well. For example:
+
+    @media print {
+      .page {
+        width: 8in;
+        @at-root (without: media) {
+          color: red;
+        }
+      }
+    }
+
+produces:
+
+    @media print {
+      .page {
+        width: 8in;
+      }
+    }
+    .page {
+      color: red;
+    }
+
+You can use `@at-root (without: ...)` to move outside of any
+directive. You can also do it with multiple directives separated by a
+space: `@at-root (without: media supports)` moves outside of both
+`@media` and `@supports` queries.
+
+There are two special values you can pass to `@at-root`. "rule" refers
+to normal CSS rules; `@at-root (without: rule)` is the same as
+`@at-root` with no query. `@at-root (without: all)` means that the
+styles should be moved outside of *all* directives and CSS rules.
+
+If you want to specify which directives or rules to include, rather
+than listing which ones should be excluded, you can use `with` instead
+of `without`. For example, `@at-root (with: rule)` will move outside
+of all directives, but will preserve any CSS rules.
+
+### Smaller Improvements
+
+* The parent selector, `&`, can be used with an identifier suffix. For
+  example, `&-suffix` and `&_suffix` are now legal. The suffix will be
+  added to the end of the parent selector, and will throw an error if
+  this isn't possible. `&` must still appear at the beginning of a
+  compound selector -- that is, `.foo-&` is still illegal.
+
+* [listen](http://github.com/guard/listen) is no longer bundled with
+  Sass, nor is it a standard RubyGems dependency. Instead, it's
+  automatically installed along with Sass in order to ensure that the
+  user ends up with a version of Listen that works with their local
+  Ruby version.
+
+* Sass now has numerous functions for working with strings:
+  \{Sass::Script::Functions#str_length `str-length`} will return the length of a
+  string; \{Sass::Script::Functions#str_insert `str-insert`} will insert one
+  string into another; \{Sass::Script::Functions#str_index `str-index`} will
+  return the index of a substring within another string;
+  \{Sass::Script::Functions#str_slice `str-slice`} will slice a substring from a
+  string; \{Sass::Script::Functions#to_upper_case `to-upper-case`} will
+  transform a string to upper case characters; and
+  \{Sass::Script::Functions#to_lower_case `to-lower-case`} will transform a
+  string to lower case characters.
+
+* A \{Sass::Script::Functions#list_separator `list-separator`} function has been
+  added to determine what separator a list uses. Thanks to [Sam
+  Richard](https://github.com/Snugug).
+
+* Custom Ruby functions can now access the global environment, which
+  allows them the same power as Sass-based functions with respect to
+  reading and setting variables defined elsewhere in the stylesheet.
+
+* The `set-nth($list, $n, $value)` function lets you construct a new
+  list based on `$list`, with the nth element changed to the value
+  specified.
+
+* In order to make it easier for mixins to process maps, they may now
+  recursively call themselves and one another. It is no longer an
+  error to have a mixin `@include` loop.
+
+* Add "grey" and "transparent" as recognized SassScript colors. Thanks to [Rob
+  Wierzbowski](https://github.com/robwierzbowski).
+
+* Add a function \{Sass::Script::Functions#unique\_id `unique-id()`} that will
+  return a CSS identifier that is unique within the scope of a single CSS file.
+
+* Allow negative indices into lists when using `nth()`.
+
+* You can now detect the presence of a Sass feature using the new function
+  `feature-exists($feature-name)`. There are no detectable features in this
+  release, this is provided so that subsequent releases can begin to
+  use it. Additionally, plugins can now expose their functionality
+  through `feature-exists` by calling `Sass.add_feature(feature_name)`. Features
+  exposed by plugins must begin with a dash to distinguish them from
+  official features.
+
+* It is now possible to determine the existence of different Sass
+  constructs using these new functions:
+
+  * `variable-exists($name)` checks if a variable resolves in the
+    current scope.
+  * `global-variable-exists($name)` checks if a global variable of the
+    given name exists.
+  * `function-exists($name)` checks if a function exists.
+  * `mixin-exists($name)` checks if a mixin exists.
+
+* You can call a function by name by passing the function name to the
+  call function. For example, `call(nth, a b c, 2)` returns `b`.
+
+* Comments following selectors in the indented syntax will be correctly
+  converted using `sass-convert`.
+
+* `@each` now supports "multiple assignment", which makes it easier to iterate
+  over lists of lists. If you write `@each $var1, $var2, $var3 in a b c, d e f,
+  g h i`, the elements of the sub-lists will be assigned individually to the
+  variables. `$var1`, `$var2`, and `$var3` will be `a`, `b` and `c`; then `d`,
+  `e`, and `f`; and then `g`, `h`, and `i`. For more information, see
+  {file:SASS_REFERENCE.md#each-multi-assign the `@each` reference}.
+
+* `@for` loops can now go downward as well as upward. For example,
+  `@for $var from 5 through 1` will set `$var` to `5`, `4`, `3`, `2`,
+  and `1`. Thanks to [Robin Roestenburg](http://twitter.com/robinroest).
+
+* There is a new {Sass::Script::Value::Helpers convenience API} for creating
+  Sass values from within ruby extensions.
+
+* The `if()` function now only evaluates the argument corresponding to
+  the value of the first argument.
+
+* Comma-separated lists may now have trailing commas (e.g. `1, 2,
+  3,`). This also allows you to use a trailing comma to distinguish a
+  list with a single element from that element itself -- for example,
+  `(1,)` is explicitly a list containing the value `1`.
+
+* All directives that are nested in CSS rules or properties and that
+  contain more CSS rules or properties are now bubbled up through
+  their parent rules.
+
+* A new `random()` function returns a random number.
+
+* A new function inspect($value) is provided for debugging the current
+  sass representation of a value.
+
+* The `@debug` directive now automatically inspects sass objects that are not
+  strings.
+
+* Numbers will no longer be emitted in scientific notation.
+
+* `sass-convert` will now correctly handle silent (`//`-style) comments
+  contained within loud (`/* */`-style) comments.
+
+* Allow modulo arithmetic for numbers with compatible units. Thanks to
+  [Isaac Devine](http://www.devinesystems.co.nz).
+
+* Keyword arguments to mixins and functions that contain hyphens will have the
+  hyphens preserved when using `sass-convert`.
+
+### Backwards Incompatibilities -- Must Read!
+
+* Sass will now throw an error when `@extend` is used to extend a selector
+  outside the `@media` context of the extending selector. This means the
+  following will be an error:
+
+      @media screen {
+        .foo { @extend .bar; }
+      }
+      .bar { color: blue; }
+
+* Sass will now throw an error when an `@extend` that has no effect is used. The
+  `!optional` flag may be used to avoid this behavior for a single `@extend`.
+
+* Sass will now throw an error when it encounters a single `@import` statement
+  that tries to import more than one file. For example, if you have `@import
+  "screen"` and both `screen.scss` and `_screen.scss` exist, a warning will be
+  printed.
+
+* `grey` and `transparent` are no longer interpreted as strings; they're now
+  interpreted as colors, as per the CSS spec.
+
+* The automatic placement of the current working directory onto the Sass
+  load path is now deprecated as this causes unpredictable build
+  processes.  If you need the current working directory to be available,
+  set `SASS_PATH=.` in your shell's environment.
+
+* `Sass::Compiler.on_updating_stylesheet` has been removed.
+
+* `Sass::Plugin.options=` has been removed.
+
+* `Sass::Script::Number::PRECISION` has been removed.
+
+* The methods in the `Sass::Util` module can no longer be used by
+  including it. They must be invoked on the module itself for
+  performance reasons.
+
+* Sass values have always been immutable. The ruby object that backs
+  each sass value is now "frozen" to prevent accidental modification and
+  for performance.
+
+* Many classes in the \{Sass::Script} have been rearranged. All the value
+  classes have been moved into \{Sass::Script::Value} (e.g.
+  \{Sass::Script::Value::Color}, \{Sass::Script::Value::String}, etc). Their
+  base class is now \{Sass::Script::Value::Base} instead of
+  `Sass::Script::Literal`. All the parse tree classes have been moved into
+  \{Sass::Script::Tree} (e.g. \{Sass::Script::Tree::Node},
+  \{Sass::Script::Tree::Operation}, etc).
+
+  The old names will continue to work for the next couple releases, but they
+  will be removed eventually. Any code using them should upgrade to the new
+  names.
+
+* As part of a migration to cleaner variable semantics, assigning to
+  global variables in a local context by default is deprecated. If
+  there's a global variable named `$color` and you write `$color:
+  blue` within a CSS rule, Sass will now print a warning; in the
+  future, it will create a new local variable named `$color`. You may
+  now explicitly assign to global variables using the `!global` flag;
+  for example, `$color: blue !global` will always assign to the global
+  `$color` variable.
+
+* Two numbers separated by a hyphen with no whitespace will now be
+  parsed as a subtraction operation rather than two numbers in a list.
+  That is, `2px-1px` will parse the same as `2px - 1px` rather than
+  `2px -1px`.
+
+* `index()`'s `false` return value when a value isn't found is deprecated. In
+  future Sass releases it will be `null` instead, so it should be used in ways
+  that are compatible with both `false` and `null`.
+
+* `mix()`'s arguments are now `$color1` and `$color2` rather than
+  `$color-1` and `$color-2`, in keeping with other functions.
+
+* `comparable()`'s arguments are now `$number1` and `$number2` rather than
+  `$number-1` and `$number-2`, in keeping with other functions.
+
+* `percentage()`, `round()`, `ceil()`, `floor()`, and `abs()` now
+  take arguments named '$number' instead of '$value'.
+
+## 3.2.16 (17 March 2014)
+
+* Handle a race condition in the filesystem cache store when a cache
+  entry becomes invalidated.
+
+## 3.2.15 (7 March 2014)
+
+* Support `&.foo` when the parent selector has a newline followed by a comma.
+
+## 3.2.14 (24 January 2014)
+
+* Don't crash when parsing a directive with no name in the indented syntax.
+
+* Clean up file paths when importing to avoid errors for overlong path
+  names.
+
+* Parse calls to functions named `true`, `false`, and `null` as function calls.
+
+* Don't move CSS `@import`s to the top of the file unless it's necessary.
+
+## 3.2.13 (19 December 2013)
+
+* Numbers returned by user-defined functions now trigger division, just like
+  numbers stored in variables.
+
+* Support importing files in paths with open brackets.
+
+* Fix `sass-convert`'s handling of rules with empty bodies when converting from
+  CSS.
+
+* Fix CSS imports using `url()` with a quoted string and media queries.
+
+## 3.2.12 (4 October 2013)
+
+* Add a couple missing `require`s, fixing some load errors, especially when
+  using the command-line interface.
+
+* Tune up some heuristics for eliminating redundant generated selectors. This
+  will prevent some selector elimination in cases where multi-layered `@extend`
+  is being used and where it seems intuitively like selectors shouldn't be
+  eliminated.
+
+## 3.2.11 (27 September 2013)
+
+* Fix `@extend`'s semantics with respect to pseudo-elements. They are no longer
+  treated identically to pseudo-classes.
+
+* A more understandable error is now provided when the `-E` option is
+  passed to the Sass command line in ruby 1.8
+
+* Fixed a bug in the output of lists containing unary plus or minus
+  operations during sass <=> scss conversion.
+
+* Avoid the [IE7 `content: counter` bug][cc bug] with `content: counters` as
+  well.
+
+* Fix some thread-safety issues.
+
+## 3.2.10 (26 July 2013)
+
+* Use the Sass logger infrastructure for `@debug` directives.
+
+* When printing a Sass error into a CSS comment, escape `*/` so the comment
+  doesn't end prematurely.
+
+* Preserve the `!` in `/*! ... */`-style comments.
+
+* Fix a bug where selectors were being incorrectly trimmed when using `@extend`.
+
+* Fix a bug where `sass --unix-newlines` and `sass-convert --in-place` are not
+  working on Windows (thanks [SATO Kentaro](http://www.ranvis.com)).
+
+## 3.2.9 (10 May 2013)
+
+* Fix a bug where `@extend`s would occasionally cause a selector to be generated
+  with the incorrect specificity.
+
+* Avoid loading [listen](http://github.com/guard/listen) v1.0, even if it's
+  installed as a Gem (see [issue 719](https://github.com/nex3/sass/issues/719)).
+
+* Update the bundled version of [listen](http://github.com/guard/listen) to
+  0.7.3.
+
+* Automatically avoid the [IE7 `content: counter` bug][cc bug].
+
+[cc bug]: http://jes.st/2013/ie7s-css-breaking-content-counter-bug/
+
+## 3.2.8 (22 April 2013)
+
+* Fix some edge cases where redundant selectors were emitted when using
+  `@extend`.
+
+* Fix a bug where comma-separated lists with interpolation could lose elements.
+
+* Fix a bug in `sass-convert` where lists being passed as arguments to functions
+  or mixins would lose their surrounding parentheses.
+
+* Fix a bug in `sass-convert` where `null` wasn't being converted correctly.
+
+* Fix a bug where multiple spaces in a string literal would sometimes be folded
+  together.
+
+* `sass` and `sass-convert` won't create an empty file before writing to it.
+  This fixes a flash of unstyled content when using LiveReload and similar
+  tools.
+
+* Fix a case where a corrupted cache could produce fatal errors on some versions
+  of Ruby.
+
+* Fix a case where a mixin loop error would be incorrectly reported when using
+  `@content`.
+
+## 3.2.7 (8 March 2013)
+
+* The \{Sass::Script::Functions#index `index`} and \{Sass::Script::Functions#zip
+  `zip`} functions now work like all other list functions and treat individual
+  values as single-element lists.
+
+* Avoid stack overflow errors caused by very long function or mixin argument
+  lists.
+
+* Emit relative paths when using the `--line-comments` flag of the `sass`
+  executable.
+
+* Fix a case where very long numbers would cause the SCSS parser to
+  take exponential time.
+
+## 3.2.6 (22 February 2013)
+
+* Support for Rubinius 2.0.0.rc1. All tests pass in 1.8 mode. 1.9 mode has some
+  tests blocked on [Rubinius issue
+  2139](https://github.com/rubinius/rubinius/issues/2139).
+
+* Support for JRuby 1.7.2.
+
+* Support for symlinked executables. Thanks to [Yin-So
+  Chen](http://yinsochen.com/).
+
+* Support for bubbling `@supports` queries in the indented syntax.
+
+* Fix an incorrect warning when using `@extend` from within nested `@media`
+  queries.
+
+* Update the bundled version of [listen](http://github.com/guard/listen) to
+  0.7.2.
+
+## 3.2.5 (4 January 2013)
+
+* Fix a bug where bogus `@extend` warnings were being generated.
+
+* Fix an `@import` bug on Windows. Thanks to [Darryl
+  Miles](https://github.com/dlmiles).
+
+* Ruby 2.0.0-preview compatibility. Thanks to [Eric
+  Saxby](http://www.livinginthepast.org/).
+
+* Fix incorrect line numbering when using DOS line endings with the indented
+  syntax.
+
+## 3.2.4 (21 December 2012)
+
+* Fix imports from `.jar` files in JRuby. Thanks to [Alex
+  Hvostov](https://github.com/argv-minus-one).
+
+* Allow comments within `@import` statements in SCSS.
+
+* Fix a parsing performance bug where long decimals would occasionally take many
+  minutes to parse.
+
+## 3.2.3 (9 November 2012)
+
+* `sass --watch` no longer crashs when a file in a watched directory is deleted.
+
+* Allow `@extend` within bubbling nodes such as `@media`.
+
+* Fix various JRuby incompatibilities and test failures.
+
+* Work around a performance bug that arises from using `@extend` with
+  deeply-nested selectors.
+
+## 3.2.2 (2 November 2012)
 
 * Add a `--poll` option to force `sass --watch` to use the polling backend to
   [Listen](https://github.com/guard/listen).
@@ -21,8 +681,8 @@
 * Fix a performance issue with `@import` that only appears when
   ActiveSupport is loaded.
 
-* Fix flushing of actions to stdout. Thanks to [Russell Davis]
-  (http://github.com/russelldavis).
+* Fix flushing of actions to stdout. Thanks to
+  [Russell Davis](http://github.com/russelldavis).
 
 * Fix the documentation for the `max()` function.
 
@@ -171,7 +831,7 @@ that make use of `@media` and other directives dynamically.
   {Sass.load_paths}. This allows plugins and libraries to easily register their
   Sass files such that they're accessible to all {Sass::Engine} instances.
 
-* `Sass.load_paths` is initialized to the value of the `SASS_PATH`environment
+* `Sass.load_paths` is initialized to the value of the `SASS_PATH` environment
   variable. This variable should contain a colon-separated list of load paths
   (semicolon-separated on Windows).
 
@@ -201,7 +861,7 @@ that make use of `@media` and other directives dynamically.
 * Decimal numbers now default to five digits of precision after the decimal
   point.
 
-* The \{Sass::Script::Functions::EvaluationContext.options options hash}
+* The \{Sass::Script::Functions::EvaluationContext#options options hash}
   available to Sass functions now contains the filename of the file that the
   function was executed in, rather than the top-level file.
 
@@ -567,7 +1227,7 @@ that use keywords to encompass a large amount of functionality in one function.
   it returns `$color` with its lightness increased by 10%.
 
 * The {Sass::Script::Functions#scale_color scale_color} function
-  is similar to {Sass::Script::Functions#adjust adjust},
+  is similar to {Sass::Script::Functions#adjust_color adjust_color},
   but instead of increasing and/or decreasing a color's properties by fixed amounts,
   it scales them fluidly by percentages.
   The closer the percentage is to 100% (or -100%),
@@ -845,7 +1505,8 @@ This means that under Ruby 1.8 it's *not* safe to import files with different en
 
 [Tagged on GitHub](http://github.com/nex3/sass/commit/3.0.19).
 
-* Make the alpha value for `rgba` colors respect {Sass::Script::Number::PRECISION}.
+* Make the alpha value for `rgba` colors respect
+  {Sass::Script::Value::Number.precision}.
 
 * Remove all newlines in selectors in `:compressed` mode.
 
@@ -2067,7 +2728,7 @@ There were no changes made to Sass between versions 2.2.18 and 2.2.19.
 
 [Tagged on GitHub](http://github.com/nex3/sass/commit/2.2.15).
 
-* Added {Sass::Script::Color#with} for a way of setting color channels
+* Added {Sass::Script::Value::Color#with} for a way of setting color channels
   that's easier than manually constructing a new color
   and is forwards-compatible with alpha-channel colors
   (to be introduced in Sass 2.4).
@@ -2093,8 +2754,8 @@ There were no changes made to Sass between versions 2.2.18 and 2.2.19.
 These changes only affect people defining their own Sass functions
 using {Sass::Script::Functions}.
 
-* Sass::Script::Color#value attribute is deprecated.
-  Use {Sass::Script::Color#rgb} instead.
+* `Sass::Script::Color#value` attribute is deprecated.
+  Use {Sass::Script::Value::Color#rgb} instead.
   The returned array is now frozen as well.
 
 * Add an `assert_type` function that's available to {Sass::Script::Functions}.

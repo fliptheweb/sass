@@ -58,6 +58,10 @@ class SassScriptConversionTest < Test::Unit::TestCase
     assert_renders "foo($karg1: val, $karg2: val2)"
   end
 
+  def test_funcall_with_hyphen_conversion_keyword_arg
+    assert_renders "foo($a-b_c: val)"
+  end
+
   def test_url
     assert_renders "url(foo.gif)"
     assert_renders "url($var)"
@@ -69,11 +73,47 @@ class SassScriptConversionTest < Test::Unit::TestCase
     assert_renders "$flaznicate"
   end
 
+  def test_null
+    assert_renders "null"
+  end
+
+  def test_empty_list
+    assert_renders "()"
+  end
+
+  def test_list_in_args
+    assert_renders "foo((a, b, c))"
+    assert_renders "foo($arg: (a, b, c))"
+    assert_renders "foo(a, b, (a, b, c)...)"
+  end
+
+  def test_singleton_list
+    assert_renders "(1,)"
+    assert_renders "(1 2 3,)"
+    assert_renders "((1, 2, 3),)"
+  end
+
+  def test_map
+    assert_renders "(foo: bar)"
+    assert_renders "(foo: bar, baz: bip)"
+    assert_renders "(foo: bar, baz: (bip: bap))"
+  end
+
+  def test_map_in_list
+    assert_renders "(foo: bar) baz"
+    assert_renders "(foo: bar), (baz: bip)"
+  end
+
+  def test_list_in_map
+    assert_renders "(foo: bar baz)"
+    assert_renders "(foo: (bar, baz), bip: bop)"
+  end
+
   def self.test_precedence(outer, inner)
     op_outer = Sass::Script::Lexer::OPERATORS_REVERSE[outer]
     op_inner = Sass::Script::Lexer::OPERATORS_REVERSE[inner]
     class_eval <<RUBY
-      def test_precedence_#{outer}_#{inner} 
+      def test_precedence_#{outer}_#{inner}
         assert_renders "$foo #{op_outer} $bar #{op_inner} $baz"
         assert_renders "$foo #{op_inner} $bar #{op_outer} $baz"
 
@@ -92,7 +132,7 @@ RUBY
     op = separator_for(op_name)
     sibling = separator_for(sibling_name)
     class_eval <<RUBY
-      def test_associative_#{op_name}_#{sibling_name} 
+      def test_associative_#{op_name}_#{sibling_name}
         assert_renders "$foo#{op}$bar#{op}$baz"
 
         assert_equal "$foo#{op}$bar#{op}$baz",
@@ -120,7 +160,7 @@ RUBY
     op = Sass::Script::Lexer::OPERATORS_REVERSE[op_name]
     sibling = Sass::Script::Lexer::OPERATORS_REVERSE[sibling_name]
     class_eval <<RUBY
-      def test_non_associative_#{op_name}_#{sibling_name} 
+      def test_non_associative_#{op_name}_#{sibling_name}
         assert_renders "$foo #{op} $bar #{op} $baz"
 
         assert_renders "$foo #{op} ($bar #{op} $baz)"

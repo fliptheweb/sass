@@ -26,7 +26,7 @@ module Sass
       end
 
       def nested_properties!(node, space)
-        expected('expression (e.g. 1px, bold)');
+        expected('expression (e.g. 1px, bold)')
       end
 
       @sass_script_parser = Class.new(Sass::Script::CssParser)

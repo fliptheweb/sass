@@ -1,4 +1,3 @@
-require 'pathname'
 require 'set'
 
 module Sass
@@ -6,7 +5,6 @@ module Sass
     # The default importer, used for any strings found in the load path.
     # Simply loads Sass files from the filesystem using the default logic.
     class Filesystem < Base
-
       attr_accessor :root
 
       # Creates a new filesystem importer that imports files relative to a given path.
@@ -30,7 +28,7 @@ module Sass
 
       # @see Base#mtime
       def mtime(name, options)
-        file, s = Sass::Util.destructure(find_real_file(@root, name, options))
+        file, _ = Sass::Util.destructure(find_real_file(@root, name, options))
         File.mtime(file) if file
       rescue Errno::ENOENT
         nil
@@ -39,7 +37,7 @@ module Sass
       # @see Base#key
       def key(name, options)
         [self.class.name + ":" + File.dirname(File.expand_path(name)),
-          File.basename(name)]
+         File.basename(name)]
       end
 
       # @see Base#to_s
@@ -53,6 +51,32 @@ module Sass
 
       def eql?(other)
         root.eql?(other.root)
+      end
+
+      # @see Base#directories_to_watch
+      def directories_to_watch
+        [root]
+      end
+
+      # @see Base#watched_file?
+      def watched_file?(filename)
+        filename =~ /\.s[ac]ss$/ &&
+          filename.start_with?(root + File::SEPARATOR)
+      end
+
+      def public_url(name, sourcemap_directory = nil)
+        if sourcemap_directory.nil?
+          warn_about_public_url(name)
+        else
+          file_pathname = Sass::Util.cleanpath(Sass::Util.absolute_path(name, @root))
+          sourcemap_pathname = Sass::Util.cleanpath(sourcemap_directory)
+          begin
+            file_pathname.relative_path_from(sourcemap_pathname).to_s
+          rescue ArgumentError # when a relative path cannot be constructed
+            warn_about_public_url(name)
+            nil
+          end
+        end
       end
 
       protected
@@ -91,8 +115,14 @@ module Sass
         sorted_exts = extensions.sort
         syntax = extensions[extname]
 
-        return [["#{dirname}/{_,}#{basename}.#{extensions.invert[syntax]}", syntax]] if syntax
-        sorted_exts.map {|ext, syn| ["#{dirname}/{_,}#{basename}.#{ext}", syn]}
+        if syntax
+          ret = [["#{dirname}/{_,}#{basename}.#{extensions.invert[syntax]}", syntax]]
+        else
+          ret = sorted_exts.map {|ext, syn| ["#{dirname}/{_,}#{basename}.#{ext}", syn]}
+        end
+
+        # JRuby chokes when trying to import files from JARs when the path starts with './'.
+        ret.map {|f, s| [f.sub(/^\.\//, ''), s]}
       end
 
       def escape_glob_characters(name)
@@ -101,7 +131,7 @@ module Sass
         end
       end
 
-      REDUNDANT_DIRECTORY = %r{#{Regexp.escape(File::SEPARATOR)}\.#{Regexp.escape(File::SEPARATOR)}}
+      REDUNDANT_DIRECTORY = /#{Regexp.escape(File::SEPARATOR)}\.#{Regexp.escape(File::SEPARATOR)}/
       # Given a base directory and an `@import`ed name,
       # finds an existant file that matches the name.
       #
@@ -109,32 +139,37 @@ module Sass
       # @param name [String] The filename to search for.
       # @return [(String, Symbol)] A filename-syntax pair.
       def find_real_file(dir, name, options)
+        # On windows 'dir' or 'name' can be in native File::ALT_SEPARATOR form.
+        dir = dir.gsub(File::ALT_SEPARATOR, File::SEPARATOR) unless File::ALT_SEPARATOR.nil?
+        name = name.gsub(File::ALT_SEPARATOR, File::SEPARATOR) unless File::ALT_SEPARATOR.nil?
+
         found = possible_files(remove_root(name)).map do |f, s|
-          path = (dir == "." || Pathname.new(f).absolute?) ? f : "#{dir}/#{f}"
+          path = (dir == "." || Sass::Util.pathname(f).absolute?) ? f :
+            "#{escape_glob_characters(dir)}/#{f}"
           Dir[path].map do |full_path|
             full_path.gsub!(REDUNDANT_DIRECTORY, File::SEPARATOR)
-            [full_path, s]
+            [Sass::Util.cleanpath(full_path).to_s, s]
           end
         end
         found = Sass::Util.flatten(found, 1)
         return if found.empty?
-  
+
         if found.size > 1 && !@same_name_warnings.include?(found.first.first)
           found.each {|(f, _)| @same_name_warnings << f}
-          relative_to = Pathname.new(dir)
-          if options[:_line]
+          relative_to = Sass::Util.pathname(dir)
+          if options[:_from_import_node]
             # If _line exists, we're here due to an actual import in an
             # import_node and we want to print a warning for a user writing an
             # ambiguous import.
-            candidates = found.map {|(f, _)| "    " + Pathname.new(f).relative_path_from(relative_to).to_s}.join("\n")
-            Sass::Util.sass_warn <<WARNING
-WARNING: On line #{options[:_line]}#{" of #{options[:filename]}" if options[:filename]}:
-  It's not clear which file to import for '@import "#{name}"'.
-  Candidates:
+            candidates = found.map do |(f, _)|
+              "  " + Sass::Util.pathname(f).relative_path_from(relative_to).to_s
+            end.join("\n")
+            raise Sass::SyntaxError.new(<<MESSAGE)
+It's not clear which file to import for '@import "#{name}"'.
+Candidates:
 #{candidates}
-  For now I'll choose #{File.basename found.first.first}.
-  This will be an error in future versions of Sass.
-WARNING
+Please delete or rename all but one of these files.
+MESSAGE
           else
             # Otherwise, we're here via StalenessChecker, and we want to print a
             # warning for a user running `sass --watch` with two ambiguous files.
@@ -143,7 +178,6 @@ WARNING
 WARNING: In #{File.dirname(name)}:
   There are multiple files that match the name "#{File.basename(name)}":
 #{candidates}
-  This will be an error in future versions of Sass.
 WARNING
           end
         end
@@ -155,11 +189,27 @@ WARNING
       def split(name)
         extension = nil
         dirname, basename = File.dirname(name), File.basename(name)
-        if basename =~ /^(.*)\.(#{extensions.keys.map{|e| Regexp.escape(e)}.join('|')})$/
+        if basename =~ /^(.*)\.(#{extensions.keys.map {|e| Regexp.escape(e)}.join('|')})$/
           basename = $1
           extension = $2
         end
         [dirname, basename, extension]
+      end
+
+      # Issues a warning about being unable to determine a public url.
+      #
+      # @param uri [String] A URI known to be valid for this importer.
+      # @return [NilClass] nil
+      def warn_about_public_url(uri)
+        @warnings_issued ||= Set.new
+        unless @warnings_issued.include?(uri)
+          Sass::Util.sass_warn <<WARNING
+WARNING: Couldn't determine public URL for "#{uri}" while generating sourcemap.
+  Without a public URL, there's nothing for the source map to link to.
+WARNING
+          @warnings_issued << uri
+        end
+        nil
       end
 
       private
@@ -172,10 +222,6 @@ WARNING
         options[:filename] = full_filename
         options[:importer] = self
         Sass::Engine.new(File.read(full_filename), options)
-      end
-
-      def join(base, path)
-        Pathname.new(base).join(path).to_s
       end
     end
   end

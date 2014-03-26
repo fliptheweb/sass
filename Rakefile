@@ -1,3 +1,5 @@
+require 'rubygems/package'
+
 # ----- Utility Functions -----
 
 def scope(path)
@@ -19,6 +21,25 @@ Rake::TestTask.new do |t|
   t.verbose = true
 end
 
+# ----- Code Style Enforcement -----
+
+if RUBY_VERSION !~ /^(1\.8)/ && (ENV.has_key?("RUBOCOP") && ENV["RUBOCOP"] == "true" || !(ENV.has_key?("RUBOCOP") || ENV.has_key?("TEST")))
+  require 'rubocop/rake_task'
+  Rubocop::RakeTask.new do |t|
+    t.patterns = FileList["lib/**/*"]
+  end
+else
+  task :rubocop do
+    puts "Skipping rubocop style check."
+    if !ENV.has_key?("RUBOCOP")
+      puts "Passing this check is required in order for your patch to be accepted."
+      puts "Use ruby 1.9 or greater and then run the style check with: rake rubocop"
+    end
+  end
+end
+
+task :test => :rubocop
+
 # ----- Packaging -----
 
 # Don't use Rake::GemPackageTast because we want prerequisites to run
@@ -28,7 +49,7 @@ task :package => [:revision_file, :date_file, :submodules, :permissions] do
   version = get_version
   File.open(scope('VERSION'), 'w') {|f| f.puts(version)}
   load scope('sass.gemspec')
-  Gem::Builder.new(SASS_GEMSPEC).build
+  Gem::Package.build(SASS_GEMSPEC)
   sh %{git checkout VERSION}
 
   pkg = "#{SASS_GEMSPEC.name}-#{SASS_GEMSPEC.version}"
@@ -140,6 +161,11 @@ task :release_edge do
     sh %{git reset --hard origin/master}
     sh %{rake package}
     version = get_version
+    if version.include?('.rc.')
+      puts "#{'=' * 20} Not releasing edge gem for RC version"
+      next
+    end
+
     sh %{rubyforge add_release sass sass "Bleeding Edge (v#{version})" pkg/sass-#{version}.gem}
     sh %{gem push pkg/sass-#{version}.gem}
   end
@@ -191,7 +217,7 @@ begin
     task :undocumented do
       opts = ENV["YARD_OPTS"] || ""
       ENV["YARD_OPTS"] = opts.dup + <<OPTS
- --list --query "
+ --list --tag comment --hide-tag comment --query "
   object.docstring.blank? &&
   !(object.type == :method && object.is_alias?)"
 OPTS

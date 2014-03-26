@@ -1,4 +1,4 @@
-module Sass::Script
+module Sass::Script::Value
   # A SassScript object representing a variable argument list. This works just
   # like a normal list, but can also contain keyword arguments.
   #
@@ -13,40 +13,24 @@ module Sass::Script
 
     # Creates a new argument list.
     #
-    # @param value [Array<Literal>] See \{List#value}.
-    # @param keywords [Hash<String, Literal>] See \{#keywords}
+    # @param value [Array<Value>] See \{List#value}.
+    # @param keywords [Hash<String, Value>, NormalizedMap<Value>] See \{#keywords}
     # @param separator [String] See \{List#separator}.
     def initialize(value, keywords, separator)
       super(value, separator)
-      @keywords = keywords
+      if keywords.is_a?(Sass::Util::NormalizedMap)
+        @keywords = keywords
+      else
+        @keywords = Sass::Util::NormalizedMap.new(keywords)
+      end
     end
 
     # The keyword arguments attached to this list.
     #
-    # @return [Hash<String, Literal>]
+    # @return [NormalizedMap<Value>]
     def keywords
       @keywords_accessed = true
       @keywords
-    end
-
-    # @see Node#children
-    def children
-      super + @keywords.values
-    end
-
-    # @see Node#deep_copy
-    def deep_copy
-      node = super
-      node.instance_variable_set('@keywords',
-        Sass::Util.map_hash(@keywords) {|k, v| [k, v.deep_copy]})
-      node
-    end
-
-    protected
-
-    # @see Node#_perform
-    def _perform(environment)
-      self
     end
   end
 end

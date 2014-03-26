@@ -1,6 +1,7 @@
 #!/usr/bin/env ruby
 require File.dirname(__FILE__) + '/../test_helper'
 require 'pathname'
+require 'tmpdir'
 
 class UtilTest < Test::Unit::TestCase
   include Sass::Util
@@ -39,6 +40,15 @@ class UtilTest < Test::Unit::TestCase
         "bar" => "2",
         "baz" => "3"
       }, map_hash({:foo => 1, :bar => 2, :baz => 3}) {|k, v| [k.to_s, v.to_s]})
+  end
+
+  def test_map_hash_with_normalized_map
+    map = NormalizedMap.new("foo-bar" => 1, "baz_bang" => 2)
+    result = map_hash(map) {|k, v| [k, v.to_s]}
+    assert_equal("1", result["foo-bar"])
+    assert_equal("1", result["foo_bar"])
+    assert_equal("2", result["baz-bang"])
+    assert_equal("2", result["baz_bang"])
   end
 
   def test_powerset
@@ -201,6 +211,13 @@ class UtilTest < Test::Unit::TestCase
     assert_equal([1, 2, 3, 4], flatten([[[1], 2], [3], 4], 2))
   end
 
+  def test_flatten_vertically
+    assert_equal([1, 2, 3], flatten_vertically([1, 2, 3]))
+    assert_equal([1, 3, 5, 2, 4, 6], flatten_vertically([[1, 2], [3, 4], [5, 6]]))
+    assert_equal([1, 2, 4, 3, 5, 6], flatten_vertically([1, [2, 3], [4, 5, 6]]))
+    assert_equal([1, 4, 6, 2, 5, 3], flatten_vertically([[1, 2, 3], [4, 5], 6]))
+  end
+
   def test_set_hash
     assert(set_hash(Set[1, 2, 3]) == set_hash(Set[3, 2, 1]))
     assert(set_hash(Set[1, 2, 3]) == set_hash(Set[1, 2, 3]))
@@ -243,6 +260,14 @@ class UtilTest < Test::Unit::TestCase
     test[['foo ', 1, "\n bar\n", [2, 3, 4], "\n baz"]]
   end
 
+  def nested_caller_info_fn
+    caller_info
+  end
+
+  def double_nested_caller_info_fn
+    nested_caller_info_fn
+  end
+
   def test_caller_info
     assert_equal(["/tmp/foo.rb", 12, "fizzle"], caller_info("/tmp/foo.rb:12: in `fizzle'"))
     assert_equal(["/tmp/foo.rb", 12, nil], caller_info("/tmp/foo.rb:12"))
@@ -250,6 +275,22 @@ class UtilTest < Test::Unit::TestCase
     assert_equal(["", 12, "boop"], caller_info(":12: in `boop'"))
     assert_equal(["/tmp/foo.rb", -12, "fizzle"], caller_info("/tmp/foo.rb:-12: in `fizzle'"))
     assert_equal(["/tmp/foo.rb", 12, "fizzle"], caller_info("/tmp/foo.rb:12: in `fizzle {}'"))
+
+    info = nested_caller_info_fn
+    assert_equal(__FILE__, info[0])
+    assert_equal("test_caller_info", info[2])
+
+    info = proc {nested_caller_info_fn}.call
+    assert_equal(__FILE__, info[0])
+    assert_match(/^(block in )?test_caller_info$/, info[2])
+
+    info = double_nested_caller_info_fn
+    assert_equal(__FILE__, info[0])
+    assert_equal("double_nested_caller_info_fn", info[2])
+
+    info = proc {double_nested_caller_info_fn}.call
+    assert_equal(__FILE__, info[0])
+    assert_equal("double_nested_caller_info_fn", info[2])
   end
 
   def test_version_gt
@@ -279,6 +320,15 @@ class UtilTest < Test::Unit::TestCase
     def foo
       Sass::Util.abstract(self)
     end
+    def old_method
+      Sass::Util.deprecated(self)
+    end
+    def old_method_with_custom_message
+      Sass::Util.deprecated(self, "Call FooBar#new_method instead.")
+    end
+    def self.another_old_method
+      Sass::Util.deprecated(self)
+    end
   end
 
   def test_abstract
@@ -286,4 +336,123 @@ class UtilTest < Test::Unit::TestCase
       "UtilTest::FooBar must implement #foo") {FooBar.new.foo}
   end
 
+  def test_deprecated
+    assert_warning("DEPRECATION WARNING: UtilTest::FooBar#old_method will be removed in a future version of Sass.") { FooBar.new.old_method }
+    assert_warning(<<WARNING) { FooBar.new.old_method_with_custom_message }
+DEPRECATION WARNING: UtilTest::FooBar#old_method_with_custom_message will be removed in a future version of Sass.
+Call FooBar#new_method instead.
+WARNING
+    assert_warning("DEPRECATION WARNING: UtilTest::FooBar.another_old_method will be removed in a future version of Sass.") { FooBar.another_old_method }
+  end
+
+  def test_json_escape_string
+    assert_json_string "", ""
+    alphanum = (("0".."9").to_a).concat(("a".."z").to_a).concat(("A".."Z").to_a).join
+    assert_json_string alphanum, alphanum
+    assert_json_string "'\"\\'", "'\\\"\\\\'"
+    assert_json_string "\b\f\n\r\t", "\\b\\f\\n\\r\\t"
+  end
+
+  def assert_json_string(source, target)
+    assert_equal target, json_escape_string(source)
+  end
+
+  def test_json_value_of
+    assert_json_value 0, "0"
+    assert_json_value(-42, "-42")
+    assert_json_value 42, "42"
+    assert_json_value true, "true"
+    assert_json_value false, "false"
+    assert_json_value "", "\"\""
+    assert_json_value "\"\"", "\"\\\"\\\"\""
+    assert_json_value "Multi\nLine\rString", "\"Multi\\nLine\\rString\""
+    assert_json_value [1, "some\nstr,ing", false, nil], "[1,\"some\\nstr,ing\",false,null]"
+  end
+
+  def assert_json_value(source, target)
+    assert_equal target, json_value_of(source)
+  end
+
+  def test_vlq
+    assert_equal "A", encode_vlq(0)
+    assert_equal "e", encode_vlq(15)
+    assert_equal "gB", encode_vlq(16)
+    assert_equal "wH", encode_vlq(120)
+  end
+
+  def assert_vlq_encodes(int, vlq)
+    vlq_from_decimal_array = decimal_array.map {|d| encode_vlq(d)}.join
+    decimal_array_from_vlq = decode_vlq(vlq)
+    assert_equal vlq, vlq_from_decimal_array
+    assert_equal decimal_array, decimal_array_from_vlq
+  end
+
+  def test_atomic_writes
+    # when using normal writes, this test fails about 90% of the time.
+    filename = File.join(Dir.tmpdir, "test_atomic")
+    5.times do
+      writes_to_perform = %w(1 2 3 4 5 6 7 8 9).map {|i| "#{i}\n" * 100_000}
+      threads = writes_to_perform.map do |to_write|
+        Thread.new do
+          # To see this test fail with a normal write,
+          # change to the standard file open mechanism:
+          # open(filename, "w") do |f|
+          atomic_create_and_write_file(filename) do |f|
+            f.write(to_write)
+          end
+        end
+      end
+      loop do
+        contents = File.exist?(filename) ? File.read(filename) : nil
+        next if contents.nil? || contents.size == 0
+        unless writes_to_perform.include?(contents)
+          if contents.size != writes_to_perform.first.size
+            fail "Incomplete write detected: was #{contents.size} characters, " +
+                 "should have been #{writes_to_perform.first.size}"
+          else
+            fail "Corrupted read/write detected"
+          end
+        end
+        break if threads.all? {|t| !t.alive?}
+      end
+      threads.each {|t| t.join}
+    end
+  end
+
+  def test_atomic_write_permissions
+    atomic_filename = File.join(Dir.tmpdir, "test_atomic_perms.atomic")
+    normal_filename = File.join(Dir.tmpdir, "test_atomic_perms.normal")
+    atomic_create_and_write_file(atomic_filename) {|f| f.write("whatever\n") }
+    open(normal_filename, "wb") {|f| f.write("whatever\n") }
+    assert_equal File.stat(normal_filename).mode.to_s(8), File.stat(atomic_filename).mode.to_s(8)
+  ensure
+    File.unlink(atomic_filename) rescue nil
+    File.unlink(normal_filename) rescue nil
+  end
+
+  def test_atomic_writes_respect_umask
+    atomic_filename = File.join(Dir.tmpdir, "test_atomic_perms.atomic")
+    atomic_create_and_write_file(atomic_filename) do |f|
+      f.write("whatever\n")
+    end
+    assert_equal 0, File.stat(atomic_filename).mode & File.umask
+  ensure
+    File.unlink(atomic_filename)
+  end
+
+  class FakeError < RuntimeError; end
+
+  def test_atomic_writes_handles_exceptions
+    filename = File.join(Dir.tmpdir, "test_atomic_exception")
+    FileUtils.rm_f(filename)
+    tmp_filename = nil
+    assert_raises FakeError do
+      atomic_create_and_write_file(filename) do |f|
+        tmp_filename = f.path
+        raise FakeError.new "Borken"
+      end
+    end
+    assert !File.exist?(filename)
+    assert !File.exist?(tmp_filename)
+  end
 end

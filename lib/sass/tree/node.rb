@@ -8,14 +8,15 @@ module Sass
   # in addition to nodes for CSS rules and properties.
   # Nodes that only appear in this state are called **dynamic nodes**.
   #
-  # {Tree::Visitors::Perform} creates a static Sass tree, which is different.
-  # It still has nodes for CSS rules and properties
-  # but it doesn't have any dynamic-generation-related nodes.
-  # The nodes in this state are in the same structure as the Sass document:
-  # rules and properties are nested beneath one another.
-  # Nodes that can be in this state or in the dynamic state
-  # are called **static nodes**; nodes that can only be in this state
-  # are called **solely static nodes**.
+  # {Tree::Visitors::Perform} creates a static Sass tree, which is
+  # different. It still has nodes for CSS rules and properties but it
+  # doesn't have any dynamic-generation-related nodes. The nodes in
+  # this state are in a similar structure to the Sass document: rules
+  # and properties are nested beneath one another, although the
+  # {Tree::RuleNode} selectors are already in their final state. Nodes
+  # that can be in this state or in the dynamic state are called
+  # **static nodes**; nodes that can only be in this state are called
+  # **solely static nodes**.
   #
   # {Tree::Visitors::Cssize} is then used to create a static CSS tree.
   # This is like a static Sass tree,
@@ -29,10 +30,35 @@ module Sass
     class Node
       include Enumerable
 
+      def self.inherited(base)
+        node_name = base.name.gsub(/.*::(.*?)Node$/, '\\1').downcase
+        base.instance_eval <<-METHODS
+          # @return [Symbol] The name that is used for this node when visiting.
+          def node_name
+            :#{node_name}
+          end
+
+          # @return [Symbol] The method that is used on the visitor to visit nodes of this type.
+          def visit_method
+            :visit_#{node_name}
+          end
+
+          # @return [Symbol] The method name that determines if the parent is invalid.
+          def invalid_child_method_name
+            :"invalid_#{node_name}_child?"
+          end
+
+          # @return [Symbol] The method name that determines if the node is an invalid parent.
+          def invalid_parent_method_name
+            :"invalid_#{node_name}_parent?"
+          end
+        METHODS
+      end
+
       # The child nodes of this node.
       #
       # @return [Array<Tree::Node>]
-      attr_accessor :children
+      attr_reader :children
 
       # Whether or not this node has child nodes.
       # This may be true even when \{#children} is empty,
@@ -45,6 +71,11 @@ module Sass
       #
       # @return [Fixnum]
       attr_accessor :line
+
+      # The source range in the document on which this node appeared.
+      #
+      # @return [Sass::Source::Range]
+      attr_accessor :source_range
 
       # The name of the document on which this node appeared.
       #
@@ -127,10 +158,21 @@ module Sass
 
       # Computes the CSS corresponding to this static CSS tree.
       #
-      # @return [String, nil] The resulting CSS
+      # @return [String] The resulting CSS
       # @see Sass::Tree
-      def to_s
-        Sass::Tree::Visitors::ToCss.visit(self)
+      def css
+        Sass::Tree::Visitors::ToCss.new.visit(self)
+      end
+
+      # Computes the CSS corresponding to this static CSS tree, along with
+      # the respective source map.
+      #
+      # @return [(String, Sass::Source::Map)] The resulting CSS and the source map
+      # @see Sass::Tree
+      def css_with_sourcemap
+        visitor = Sass::Tree::Visitors::ToCss.new(:build_source_mapping)
+        result = visitor.visit(self)
+        return result, visitor.source_mapping
       end
 
       # Returns a representation of the node for debugging purposes.

@@ -94,7 +94,7 @@ foo {a /*: b; c */: d}
 SCSS
   end
 
-  def test_crazy_comments 
+  def test_crazy_comments
     # http://www.w3.org/Style/CSS/Test/CSS2.1/current/xhtml1/t040109-c17-comments-00-b.xht
     assert_equal <<CSS, render(<<SCSS)
 /* This is a CSS comment. */
@@ -425,7 +425,7 @@ SCSS
     assert_equal <<CSS, render(<<SCSS)
 foo {
   a: -0.5em;
-  b: 0.5em;
+  b: +0.5em;
   c: -foo(12px);
   d: +foo(12px); }
 CSS
@@ -505,11 +505,18 @@ SCSS
     assert_parses '@import url(foo.css);'
   end
 
-  def test_import_directive_with_media
+  def test_string_import_directive_with_media
     assert_parses '@import "foo.css" screen;'
     assert_parses '@import "foo.css" screen, print;'
     assert_parses '@import "foo.css" screen, print and (foo: 0);'
     assert_parses '@import "foo.css" screen, only print, screen and (foo: 0);'
+  end
+
+  def test_url_import_directive_with_media
+    assert_parses '@import url("foo.css") screen;'
+    assert_parses '@import url("foo.css") screen, print;'
+    assert_parses '@import url("foo.css") screen, print and (foo: 0);'
+    assert_parses '@import url("foo.css") screen, only print, screen and (foo: 0);'
   end
 
   def test_page_directive
@@ -566,7 +573,6 @@ SCSS
     assert_parses <<SCSS
 @foo bar {
   a: b; }
-
 @bar baz {
   c: d; }
 SCSS
@@ -586,7 +592,6 @@ SCSS
     assert_equal <<CSS, render(<<SCSS)
 @foo {
   a: b; }
-
 @bar {
   a: b; }
 CSS
@@ -651,7 +656,7 @@ SCSS
   ## Selectors
 
   # Taken from http://dev.w3.org/csswg/selectors4/#overview
-  def test_summarized_selectors
+  def test_summarized_selectors_with_element
     assert_selector_parses('*')
     assert_selector_parses('E')
     assert_selector_parses('E:not(s)')
@@ -725,7 +730,7 @@ SCSS
 
   # Taken from http://dev.w3.org/csswg/selectors4/#overview, but without element
   # names.
-  def test_summarized_selectors
+  def test_more_summarized_selectors
     assert_selector_parses(':not(s)')
     assert_selector_parses(':not(s1, s2)')
     assert_selector_parses(':matches(s1, s2)')
@@ -831,7 +836,7 @@ SCSS
 
   def assert_selector_can_contain_selectors(sel)
     try = lambda {|subsel| assert_selector_parses(sel.gsub('<sel>', subsel))}
-    
+
     try['foo|bar']
     try['*|bar']
 
@@ -1011,6 +1016,28 @@ SCSS
 
   ## Regressions
 
+  def test_double_space_string
+    assert_equal(<<CSS, render(<<SCSS))
+.a {
+  content: "  a"; }
+CSS
+.a {
+  content: "  a";
+}
+SCSS
+  end
+
+  def test_very_long_number_with_important_doesnt_take_forever
+    assert_equal(<<CSS, render(<<SCSS))
+.foo {
+  width: 97.916666666666666666666666666667% !important; }
+CSS
+.foo {
+  width: 97.916666666666666666666666666667% !important;
+}
+SCSS
+  end
+
   def test_selector_without_closing_bracket
     assert_not_parses('"]"', "foo[bar <err>{a: b}")
   end
@@ -1064,7 +1091,7 @@ SCSS
   end
 
   def render(scss, options = {})
-    tree = Sass::SCSS::CssParser.new(scss, options[:filename]).parse
+    tree = Sass::SCSS::CssParser.new(scss, options[:filename], nil).parse
     tree.options = Sass::Engine::DEFAULT_OPTIONS.merge(options)
     tree.render
   end

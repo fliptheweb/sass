@@ -7,9 +7,9 @@ class Sass::Tree::Visitors::CheckNesting < Sass::Tree::Visitors::Base
   end
 
   def visit(node)
-    if error = @parent && (
-        try_send("invalid_#{node_name @parent}_child?", @parent, node) ||
-        try_send("invalid_#{node_name node}_parent?", @parent, node))
+    if (error = @parent && (
+        try_send(@parent.class.invalid_child_method_name, @parent, node) ||
+        try_send(node.class.invalid_parent_method_name, @parent, node)))
       raise Sass::SyntaxError.new(error)
     end
     super
@@ -19,11 +19,16 @@ class Sass::Tree::Visitors::CheckNesting < Sass::Tree::Visitors::Base
   end
 
   CONTROL_NODES = [Sass::Tree::EachNode, Sass::Tree::ForNode, Sass::Tree::IfNode,
-    Sass::Tree::WhileNode, Sass::Tree::TraceNode]
+                   Sass::Tree::WhileNode, Sass::Tree::TraceNode]
   SCRIPT_NODES = [Sass::Tree::ImportNode] + CONTROL_NODES
   def visit_children(parent)
     old_parent = @parent
-    @parent = parent unless is_any_of?(parent, SCRIPT_NODES)
+    unless is_any_of?(parent, SCRIPT_NODES) ||
+        (parent.bubbles? &&
+        !old_parent.is_a?(Sass::Tree::RootNode) &&
+        !old_parent.is_a?(Sass::Tree::AtRootNode))
+      @parent = parent
+    end
     @parents.push parent
     super
   ensure
@@ -109,7 +114,9 @@ class Sass::Tree::Visitors::CheckNesting < Sass::Tree::Visitors::Base
     end
   end
 
-  VALID_PROP_CHILDREN = [Sass::Tree::CommentNode, Sass::Tree::PropNode, Sass::Tree::MixinNode] + CONTROL_NODES
+  VALID_PROP_CHILDREN =  CONTROL_NODES + [Sass::Tree::CommentNode,
+                                          Sass::Tree::PropNode,
+                                          Sass::Tree::MixinNode]
   def invalid_prop_child?(parent, child)
     unless is_any_of?(child, VALID_PROP_CHILDREN)
       "Illegal nesting: Only properties may be nested beneath properties."
@@ -121,7 +128,8 @@ class Sass::Tree::Visitors::CheckNesting < Sass::Tree::Visitors::Base
                         Sass::Tree::MixinNode]
   def invalid_prop_parent?(parent, child)
     unless is_any_of?(parent, VALID_PROP_PARENTS)
-      "Properties are only allowed within rules, directives, mixin includes, or other properties." + child.pseudo_class_selector_message
+      "Properties are only allowed within rules, directives, mixin includes, or other properties." +
+        child.pseudo_class_selector_message
     end
   end
 
@@ -132,15 +140,14 @@ class Sass::Tree::Visitors::CheckNesting < Sass::Tree::Visitors::Base
   private
 
   def is_any_of?(val, classes)
-    for c in classes
+    classes.each do |c|
       return true if val.is_a?(c)
     end
-    return false
+    false
   end
 
   def try_send(method, *args)
-    return unless respond_to?(method)
+    return unless respond_to?(method, true)
     send(method, *args)
   end
 end
-
